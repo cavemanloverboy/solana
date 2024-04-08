@@ -2768,29 +2768,155 @@ fn send_deploy_messages(
     final_signers: Option<&[&dyn Signer]>,
     max_sign_attempts: usize,
 ) -> Result<Option<Signature>, Box<dyn std::error::Error>> {
+    // Send using jito bundles
+    let jito_client = JitoRpc::new(&rpc_client);
+
     if let Some(message) = initial_message {
         if let Some(initial_signer) = initial_signer {
-            trace!("Preparing the required accounts");
+            // trace!("Preparing the required accounts");
 
-            let mut initial_transaction = Transaction::new_unsigned(message.clone());
-            simulate_and_update_compute_unit_limit(&rpc_client, &mut initial_transaction)?;
+            // let mut initial_transaction = Transaction::new_unsigned(message.clone());
+            // simulate_and_update_compute_unit_limit(&rpc_client, &mut initial_transaction)?;
 
-            let blockhash = rpc_client.get_latest_blockhash()?;
+            // let blockhash = rpc_client.get_latest_blockhash()?;
 
-            // Most of the initial_transaction combinations require both the fee-payer and new program
-            // account to sign the transaction. One (transfer) only requires the fee-payer signature.
-            // This check is to ensure signing does not fail on a KeypairPubkeyMismatch error from an
-            // extraneous signature.
-            if message.header.num_required_signatures == 2 {
-                initial_transaction.try_sign(&[fee_payer_signer, initial_signer], blockhash)?;
-            } else {
-                initial_transaction.try_sign(&[fee_payer_signer], blockhash)?;
-            }
-            let result = rpc_client.send_and_confirm_transaction_with_spinner(&initial_transaction);
-            log_instruction_custom_error::<SystemError>(result, config)
-                .map_err(|err| format!("Account allocation failed: {err}"))?;
+            // // Most of the initial_transaction combinations require both the fee-payer and new program
+            // // account to sign the transaction. One (transfer) only requires the fee-payer signature.
+            // // This check is to ensure signing does not fail on a KeypairPubkeyMismatch error from an
+            // // extraneous signature.
+            // if message.header.num_required_signatures == 2 {
+            //     initial_transaction.try_sign(&[fee_payer_signer, initial_signer], blockhash)?;
+            // } else {
+            //     initial_transaction.try_sign(&[fee_payer_signer], blockhash)?;
+            // }
+            // let result = rpc_client.send_and_confirm_transaction_with_spinner(&initial_transaction);
+            // log_instruction_custom_error::<SystemError>(result, config)
+            //     .map_err(|err| format!("Account allocation failed: {err}"))?;
+
+            jito_client.send_messages_as_bundles(
+                core::array::from_ref(message),
+                &[fee_payer_signer, initial_signer],
+                "init",
+            );
         } else {
             return Err("Buffer account not created yet, must provide a key pair".into());
+        }
+    }
+
+    pub struct JitoRpc<'a> {
+        client: reqwest::blocking::Client,
+        rpc_client: &'a RpcClient,
+    }
+
+    impl<'a> JitoRpc<'a> {
+        const TIP_ACCOUNTS: [solana_sdk::pubkey::Pubkey; 8] = [
+            solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
+            solana_sdk::pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
+            solana_sdk::pubkey!("Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY"),
+            solana_sdk::pubkey!("ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49"),
+            solana_sdk::pubkey!("DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh"),
+            solana_sdk::pubkey!("ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt"),
+            solana_sdk::pubkey!("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL"),
+            solana_sdk::pubkey!("3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"),
+        ];
+
+        pub fn tip_ix(from: &dyn Signer, amount: u64, i: usize) -> Instruction {
+            system_instruction::transfer(&from.pubkey(), &Self::TIP_ACCOUNTS[i % 8], amount)
+        }
+
+        pub fn new(rpc_client: &'a RpcClient) -> JitoRpc<'a> {
+            JitoRpc {
+                client: reqwest::blocking::Client::new(),
+                rpc_client,
+            }
+        }
+        pub fn send_messages_as_bundles(
+            &self,
+            messages: &[Message],
+            signers: &[&dyn Signer],
+            msg: &'static str,
+        ) {
+            'bundles: for (b, bundle) in messages.chunks(4).enumerate() {
+                println!("sending bundle {} of {}", b + 1, (messages.len() + 4 / 5));
+                'submit: loop {
+                    // Get latest blockhash
+                    let latest_blockhash = loop {
+                        if let Ok(bh) = self.rpc_client.get_latest_blockhash() {
+                            break bh;
+                        }
+                        #[allow(deprecated)]
+                        std::thread::sleep_ms(400);
+                    };
+
+                    // Start with tip
+                    let tip_ix = JitoRpc::tip_ix(signers[0], 250_000, b);
+                    // TODO: assumes first signer
+                    let tip_tx = Transaction::new_signed_with_payer(
+                        &[tip_ix],
+                        None,
+                        &[&signers[0]],
+                        latest_blockhash,
+                    );
+                    let mut serialized_transactions =
+                        vec![bs58::encode(bincode::serialize(&tip_tx).unwrap()).into_string()];
+
+                    // Sign, serialize, encode transactions
+                    let mut signature = Signature::default();
+                    for tx in bundle
+                        .iter()
+                        .map(|message| {
+                            let write_tx =
+                                Transaction::new(signers, message.clone(), latest_blockhash);
+                            // TODO: remove
+                            signature = write_tx.signatures[0];
+                            println!("tx sig {signature}");
+
+                            write_tx
+                        })
+                        // Serialize tx with bincode, and encode and bs58
+                        .map(|transaction| {
+                            bs58::encode(bincode::serialize(&transaction).unwrap()).into_string()
+                        })
+                    {
+                        serialized_transactions.push(tx);
+                    }
+
+                    // Send tx
+                    let send_result = self
+                        .client
+                        .post("https://mainnet.block-engine.jito.wtf/api/v1/bundles")
+                        .json(&serde_json::json! {{
+                            "jsonrpc": "2.0",
+                            "id": "1",
+                            "method": "sendBundle",
+                            "params": [serialized_transactions],
+                        }})
+                        .send();
+
+                    // Try to confirm a tx if send result is ok
+                    match send_result {
+                        Ok(r) => {
+                            println!("{:?}", r.text());
+                            // If 8 confirms fail, retry with latest blockhash again
+                            for _ in 0..8 {
+                                if matches!(
+                                    self.rpc_client.confirm_transaction(&signature),
+                                    Ok(true)
+                                ) {
+                                    println!("confirmed bundle");
+                                    continue 'bundles;
+                                };
+                                #[allow(deprecated)]
+                                std::thread::sleep_ms(2_000);
+                            }
+
+                            continue 'submit;
+                        }
+                        Err(e) => println!("{e:#?}"),
+                    }
+                }
+            }
+            println!("jito done {msg}");
         }
     }
 
@@ -2820,59 +2946,65 @@ fn send_deploy_messages(
                 }
             }
 
-            let connection_cache = if config.use_quic {
-                ConnectionCache::new_quic("connection_cache_cli_program_quic", 1)
-            } else {
-                ConnectionCache::with_udp("connection_cache_cli_program_udp", 1)
-            };
-            let transaction_errors = match connection_cache {
-                ConnectionCache::Udp(cache) => TpuClient::new_with_connection_cache(
-                    rpc_client.clone(),
-                    &config.websocket_url,
-                    TpuClientConfig::default(),
-                    cache,
-                )?
-                .send_and_confirm_messages_with_spinner(
-                    &write_messages,
-                    &[fee_payer_signer, write_signer],
-                ),
-                ConnectionCache::Quic(cache) => {
-                    let tpu_client_fut = solana_client::nonblocking::tpu_client::TpuClient::new_with_connection_cache(
-                        rpc_client.get_inner_client().clone(),
-                        config.websocket_url.as_str(),
-                        solana_client::tpu_client::TpuClientConfig::default(),
-                        cache,
-                    );
-                    let tpu_client = rpc_client
-                        .runtime()
-                        .block_on(tpu_client_fut)
-                        .expect("Should return a valid tpu client");
+            jito_client.send_messages_as_bundles(
+                &write_messages,
+                &[write_signer, fee_payer_signer],
+                "write",
+            );
 
-                    send_and_confirm_transactions_in_parallel_blocking(
-                        rpc_client.clone(),
-                        Some(tpu_client),
-                        &write_messages,
-                        &[fee_payer_signer, write_signer],
-                        SendAndConfirmConfig {
-                            resign_txs_count: Some(max_sign_attempts),
-                            with_spinner: true,
-                        },
-                    )
-                },
-            }
-            .map_err(|err| format!("Data writes to account failed: {err}"))?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            // let connection_cache = if config.use_quic {
+            //     ConnectionCache::new_quic("connection_cache_cli_program_quic", 1)
+            // } else {
+            //     ConnectionCache::with_udp("connection_cache_cli_program_udp", 1)
+            // };
+            // let transaction_errors = match connection_cache {
+            //     ConnectionCache::Udp(cache) => TpuClient::new_with_connection_cache(
+            //         rpc_client.clone(),
+            //         &config.websocket_url,
+            //         TpuClientConfig::default(),
+            //         cache,
+            //     )?
+            //     .send_and_confirm_messages_with_spinner(
+            //         &write_messages,
+            //         &[fee_payer_signer, write_signer],
+            //     ),
+            //     ConnectionCache::Quic(cache) => {
+            //         let tpu_client_fut = solana_client::nonblocking::tpu_client::TpuClient::new_with_connection_cache(
+            //             rpc_client.get_inner_client().clone(),
+            //             config.websocket_url.as_str(),
+            //             solana_client::tpu_client::TpuClientConfig::default(),
+            //             cache,
+            //         );
+            //         let tpu_client = rpc_client
+            //             .runtime()
+            //             .block_on(tpu_client_fut)
+            //             .expect("Should return a valid tpu client");
 
-            if !transaction_errors.is_empty() {
-                for transaction_error in &transaction_errors {
-                    error!("{:?}", transaction_error);
-                }
-                return Err(
-                    format!("{} write transactions failed", transaction_errors.len()).into(),
-                );
-            }
+            //         send_and_confirm_transactions_in_parallel_blocking(
+            //             rpc_client.clone(),
+            //             Some(tpu_client),
+            //             &write_messages,
+            //             &[fee_payer_signer, write_signer],
+            //             SendAndConfirmConfig {
+            //                 resign_txs_count: Some(max_sign_attempts),
+            //                 with_spinner: true,
+            //             },
+            //         )
+            //     },
+            // }
+            // .map_err(|err| format!("Data writes to account failed: {err}"))?
+            // .into_iter()
+            // .flatten()
+            // .collect::<Vec<_>>();
+
+            // if !transaction_errors.is_empty() {
+            //     for transaction_error in &transaction_errors {
+            //         error!("{:?}", transaction_error);
+            //     }
+            //     return Err(
+            //         format!("{} write transactions failed", transaction_errors.len()).into(),
+            //     );
+            // }
         }
     }
 
@@ -2880,25 +3012,29 @@ fn send_deploy_messages(
         if let Some(final_signers) = final_signers {
             trace!("Deploying program");
 
-            let mut final_tx = Transaction::new_unsigned(message.clone());
-            simulate_and_update_compute_unit_limit(&rpc_client, &mut final_tx)?;
+            // let mut final_tx = Transaction::new_unsigned(message.clone());
+            // simulate_and_update_compute_unit_limit(&rpc_client, &mut final_tx)?;
 
-            let blockhash = rpc_client.get_latest_blockhash()?;
+            // let blockhash = rpc_client.get_latest_blockhash()?;
+            // let mut signers = final_signers.to_vec();
+            // signers.push(fee_payer_signer);
+            // final_tx.try_sign(&signers, blockhash)?;
+            // return Ok(Some(
+            //     rpc_client
+            //         .send_and_confirm_transaction_with_spinner_and_config(
+            //             &final_tx,
+            //             config.commitment,
+            //             RpcSendTransactionConfig {
+            //                 preflight_commitment: Some(config.commitment.commitment),
+            //                 ..RpcSendTransactionConfig::default()
+            //             },
+            //         )
+            //         .map_err(|e| format!("Deploying program failed: {e}"))?,
+            // ));
             let mut signers = final_signers.to_vec();
             signers.push(fee_payer_signer);
-            final_tx.try_sign(&signers, blockhash)?;
-            return Ok(Some(
-                rpc_client
-                    .send_and_confirm_transaction_with_spinner_and_config(
-                        &final_tx,
-                        config.commitment,
-                        RpcSendTransactionConfig {
-                            preflight_commitment: Some(config.commitment.commitment),
-                            ..RpcSendTransactionConfig::default()
-                        },
-                    )
-                    .map_err(|e| format!("Deploying program failed: {e}"))?,
-            ));
+
+            jito_client.send_messages_as_bundles(core::array::from_ref(message), &signers, "final");
         }
     }
 
