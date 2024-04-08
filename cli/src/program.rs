@@ -1327,7 +1327,8 @@ fn process_program_deploy(
             &BlockhashQuery::default(),
         )?;
     }
-    if result.is_err() && !buffer_provided {
+    let always_print = true;
+    if result.is_err() && !buffer_provided || always_print {
         // We might have deployed "temporary" buffer but failed to deploy our program from this
         // buffer, reporting this to the user - so he can retry deploying re-using same buffer.
         report_ephemeral_mnemonic(buffer_words, buffer_mnemonic);
@@ -1530,7 +1531,8 @@ fn process_write_buffer(
         compute_unit_price,
         max_sign_attempts,
     );
-    if result.is_err() && buffer_signer_index.is_none() && buffer_signer.is_some() {
+    let always_print = true;
+    if result.is_err() && buffer_signer_index.is_none() && buffer_signer.is_some() || always_print {
         report_ephemeral_mnemonic(words, mnemonic);
     }
     result
@@ -2849,7 +2851,7 @@ fn send_deploy_messages(
                     };
 
                     // Start with tip
-                    let tip_ix = JitoRpc::tip_ix(signers[0], 250_000, b);
+                    let tip_ix = JitoRpc::tip_ix(signers[0], 100_000, b);
                     // TODO: assumes first signer
                     let tip_tx = Transaction::new_signed_with_payer(
                         &[tip_ix],
@@ -2857,6 +2859,7 @@ fn send_deploy_messages(
                         &[&signers[0]],
                         latest_blockhash,
                     );
+                    dbg!(self.rpc_client.simulate_transaction(&tip_tx));
                     let mut serialized_transactions =
                         vec![bs58::encode(bincode::serialize(&tip_tx).unwrap()).into_string()];
 
@@ -2870,6 +2873,7 @@ fn send_deploy_messages(
                             // TODO: remove
                             signature = write_tx.signatures[0];
                             println!("tx sig {signature}");
+                            dbg!(self.rpc_client.simulate_transaction(&write_tx));
 
                             write_tx
                         })
@@ -2948,7 +2952,7 @@ fn send_deploy_messages(
 
             jito_client.send_messages_as_bundles(
                 &write_messages,
-                &[write_signer, fee_payer_signer],
+                &[fee_payer_signer, write_signer],
                 "write",
             );
 
@@ -3032,7 +3036,7 @@ fn send_deploy_messages(
             //         .map_err(|e| format!("Deploying program failed: {e}"))?,
             // ));
             let mut signers = final_signers.to_vec();
-            signers.push(fee_payer_signer);
+            signers.insert(0, fee_payer_signer);
 
             jito_client.send_messages_as_bundles(core::array::from_ref(message), &signers, "final");
         }
