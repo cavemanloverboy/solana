@@ -140,7 +140,7 @@ cloud_Initialize() {
 
 #
 # cloud_CreateInstances [networkName] [namePrefix] [numNodes]
-#                       [enableGpu] [machineType] [zone]
+#                       [machineType] [zone]
 #                       [bootDiskSize] [startupScript] [address]
 #                       [bootDiskType] [additionalDiskSize] [preemptible]
 #
@@ -149,8 +149,6 @@ cloud_Initialize() {
 # networkName   - unique name of this testnet
 # namePrefix    - unique string to prefix all the instance names with
 # numNodes      - number of instances to create
-# enableGpu     - Optionally enable GPU, use the value "true" to enable
-#                 eg, request 4 K80 GPUs with "count=4,type=nvidia-tesla-k80"
 # machineType   - GCE machine type.  Note that this may also include an
 #                 `--accelerator=` or other |gcloud compute instances create|
 #                 options
@@ -170,11 +168,10 @@ cloud_CreateInstances() {
   declare networkName="$1"
   declare namePrefix="$2"
   declare numNodes="$3"
-  declare enableGpu="$4"
-  declare machineType="$5"
-  declare zone="$6"
-  declare optionalBootDiskSize="$7"
-  declare optionalStartupScript="$8"
+  declare machineType="$4"
+  declare zone="$5"
+  declare optionalBootDiskSize="$6"
+  declare optionalStartupScript="$7"
   declare optionalAddress="$9"
 
   declare region=

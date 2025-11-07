@@ -1,8 +1,10 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
+use crate::recycled_vec::RecycledVec;
 #[cfg(feature = "dev-context-only-utils")]
 use bytes::{BufMut, BytesMut};
+
 use {
-    crate::{cuda_runtime::PinnedVec, recycler::Recycler},
+    crate::recycler::Recycler,
     bincode::config::Options,
     bytes::Bytes,
     rayon::{
@@ -151,7 +153,7 @@ impl BytesPacket {
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample, AbiEnumVisitor))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PacketBatch {
-    Pinned(PinnedPacketBatch),
+    Pinned(RecycledPacketBatch),
     Bytes(BytesPacketBatch),
     Single(BytesPacket),
 }
@@ -258,8 +260,8 @@ impl PacketBatch {
     }
 }
 
-impl From<PinnedPacketBatch> for PacketBatch {
-    fn from(batch: PinnedPacketBatch) -> Self {
+impl From<RecycledPacketBatch> for PacketBatch {
+    fn from(batch: RecycledPacketBatch) -> Self {
         Self::Pinned(batch)
     }
 }
@@ -644,36 +646,21 @@ impl IndexedParallelIterator for PacketBatchParIterMut<'_> {
 
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample))]
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct PinnedPacketBatch {
-    packets: PinnedVec<Packet>,
+pub struct RecycledPacketBatch {
+    packets: RecycledVec<Packet>,
 }
 
-pub type PacketBatchRecycler = Recycler<PinnedVec<Packet>>;
+pub type PacketBatchRecycler = Recycler<RecycledVec<Packet>>;
 
-impl PinnedPacketBatch {
+impl RecycledPacketBatch {
     pub fn new(packets: Vec<Packet>) -> Self {
-        let packets = PinnedVec::from_vec(packets);
-        Self { packets }
+        Self {
+            packets: RecycledVec::from_vec(packets),
+        }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        let packets = PinnedVec::with_capacity(capacity);
-        Self { packets }
-    }
-
-    pub fn new_pinned_with_capacity(capacity: usize) -> Self {
-        let mut batch = Self::with_capacity(capacity);
-        batch.packets.reserve_and_pin(capacity);
-        batch
-    }
-
-    pub fn new_unpinned_with_recycler(
-        recycler: &PacketBatchRecycler,
-        capacity: usize,
-        name: &'static str,
-    ) -> Self {
-        let mut packets = recycler.allocate(name);
-        packets.reserve(capacity);
+        let packets = RecycledVec::with_capacity(capacity);
         Self { packets }
     }
 
@@ -683,7 +670,7 @@ impl PinnedPacketBatch {
         name: &'static str,
     ) -> Self {
         let mut packets = recycler.allocate(name);
-        packets.reserve_and_pin(capacity);
+        packets.reserve(capacity);
         Self { packets }
     }
 
@@ -697,7 +684,7 @@ impl PinnedPacketBatch {
         batch
     }
 
-    pub fn new_unpinned_with_recycler_data_and_dests<S, T>(
+    pub fn new_with_recycler_data_and_dests<S, T>(
         recycler: &PacketBatchRecycler,
         name: &'static str,
         dests_and_data: impl IntoIterator<Item = (S, T), IntoIter: ExactSizeIterator>,
@@ -707,7 +694,7 @@ impl PinnedPacketBatch {
         T: solana_packet::Encode,
     {
         let dests_and_data = dests_and_data.into_iter();
-        let mut batch = Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
+        let mut batch = Self::new_with_recycler(recycler, dests_and_data.len(), name);
         batch
             .packets
             .resize(dests_and_data.len(), Packet::default());
@@ -730,16 +717,6 @@ impl PinnedPacketBatch {
         batch
     }
 
-    pub fn new_unpinned_with_recycler_data(
-        recycler: &PacketBatchRecycler,
-        name: &'static str,
-        mut packets: Vec<Packet>,
-    ) -> Self {
-        let mut batch = Self::new_unpinned_with_recycler(recycler, packets.len(), name);
-        batch.packets.append(&mut packets);
-        batch
-    }
-
     pub fn set_addr(&mut self, addr: &SocketAddr) {
         for p in self.iter_mut() {
             p.meta_mut().set_socket_addr(addr);
@@ -747,21 +724,21 @@ impl PinnedPacketBatch {
     }
 }
 
-impl Deref for PinnedPacketBatch {
-    type Target = PinnedVec<Packet>;
+impl Deref for RecycledPacketBatch {
+    type Target = Vec<Packet>;
 
     fn deref(&self) -> &Self::Target {
         &self.packets
     }
 }
 
-impl DerefMut for PinnedPacketBatch {
+impl DerefMut for RecycledPacketBatch {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.packets
     }
 }
 
-impl<I: SliceIndex<[Packet]>> Index<I> for PinnedPacketBatch {
+impl<I: SliceIndex<[Packet]>> Index<I> for RecycledPacketBatch {
     type Output = I::Output;
 
     #[inline]
@@ -770,14 +747,14 @@ impl<I: SliceIndex<[Packet]>> Index<I> for PinnedPacketBatch {
     }
 }
 
-impl<I: SliceIndex<[Packet]>> IndexMut<I> for PinnedPacketBatch {
+impl<I: SliceIndex<[Packet]>> IndexMut<I> for RecycledPacketBatch {
     #[inline]
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         &mut self.packets[index]
     }
 }
 
-impl<'a> IntoIterator for &'a PinnedPacketBatch {
+impl<'a> IntoIterator for &'a RecycledPacketBatch {
     type Item = &'a Packet;
     type IntoIter = Iter<'a, Packet>;
 
@@ -786,7 +763,7 @@ impl<'a> IntoIterator for &'a PinnedPacketBatch {
     }
 }
 
-impl<'a> IntoParallelIterator for &'a PinnedPacketBatch {
+impl<'a> IntoParallelIterator for &'a RecycledPacketBatch {
     type Iter = rayon::slice::Iter<'a, Packet>;
     type Item = &'a Packet;
     fn into_par_iter(self) -> Self::Iter {
@@ -794,7 +771,7 @@ impl<'a> IntoParallelIterator for &'a PinnedPacketBatch {
     }
 }
 
-impl<'a> IntoParallelIterator for &'a mut PinnedPacketBatch {
+impl<'a> IntoParallelIterator for &'a mut RecycledPacketBatch {
     type Iter = rayon::slice::IterMut<'a, Packet>;
     type Item = &'a mut Packet;
     fn into_par_iter(self) -> Self::Iter {
@@ -802,8 +779,8 @@ impl<'a> IntoParallelIterator for &'a mut PinnedPacketBatch {
     }
 }
 
-impl From<PinnedPacketBatch> for Vec<Packet> {
-    fn from(batch: PinnedPacketBatch) -> Self {
+impl From<RecycledPacketBatch> for Vec<Packet> {
+    fn from(batch: RecycledPacketBatch) -> Self {
         batch.packets.into()
     }
 }
@@ -812,7 +789,7 @@ pub fn to_packet_batches<T: Serialize>(items: &[T], chunk_size: usize) -> Vec<Pa
     items
         .chunks(chunk_size)
         .map(|batch_items| {
-            let mut batch = PinnedPacketBatch::with_capacity(batch_items.len());
+            let mut batch = RecycledPacketBatch::with_capacity(batch_items.len());
             batch.resize(batch_items.len(), Packet::default());
             for (item, packet) in batch_items.iter().zip(batch.packets.iter_mut()) {
                 Packet::populate_packet(packet, None, item).expect("serialize request");
@@ -843,8 +820,8 @@ impl BytesPacketBatch {
         Self { packets }
     }
 
-    pub fn to_pinned_packet_batch(&self) -> PinnedPacketBatch {
-        let mut batch = PinnedPacketBatch::new_pinned_with_capacity(self.len());
+    pub fn to_pinned_packet_batch(&self) -> RecycledPacketBatch {
+        let mut batch = RecycledPacketBatch::with_capacity(self.len());
         for bytes_packet in self.iter() {
             let mut packet = Packet::default();
             let size = bytes_packet.meta().size;
@@ -958,7 +935,7 @@ mod tests {
         let recycler = PacketBatchRecycler::default();
         for i in 0..2 {
             let _first_packets =
-                PinnedPacketBatch::new_with_recycler(&recycler, i + 1, "first one");
+                RecycledPacketBatch::new_with_recycler(&recycler, i + 1, "first one");
         }
     }
 }

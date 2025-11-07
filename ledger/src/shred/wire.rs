@@ -15,7 +15,6 @@ use {
     solana_perf::packet::{PacketRef, PacketRefMut},
     solana_signature::{Signature, SIGNATURE_BYTES},
     solana_signer::Signer,
-    std::ops::Range,
 };
 #[cfg(test)]
 use {
@@ -68,10 +67,6 @@ pub fn get_common_header_bytes(shred: &[u8]) -> Option<&[u8]> {
 pub(crate) fn get_signature(shred: &[u8]) -> Option<Signature> {
     let bytes = <[u8; 64]>::try_from(shred.get(..64)?).unwrap();
     Some(Signature::from(bytes))
-}
-
-pub(crate) const fn get_signature_range() -> Range<usize> {
-    0..SIGNATURE_BYTES
 }
 
 #[inline]
@@ -366,6 +361,8 @@ pub(crate) fn corrupt_packet<R: Rng>(
     packet: &mut Packet,
     keypairs: &HashMap<Slot, Keypair>,
 ) {
+    use std::ops::Range;
+
     fn modify_packet<R: Rng>(rng: &mut R, packet: &mut Packet, offsets: Range<usize>) {
         let buffer = packet.buffer_mut();
         let byte = buffer[offsets].choose_mut(rng).unwrap();
