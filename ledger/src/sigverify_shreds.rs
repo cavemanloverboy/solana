@@ -88,7 +88,7 @@ pub fn verify_shreds(
     slot_leaders: &SlotPubkeys,
     cache: &RwLock<LruCache>,
 ) -> Vec<Vec<u8>> {
-    return verify_shreds_cpu(thread_pool, batches, slot_leaders, cache);
+    verify_shreds_cpu(thread_pool, batches, slot_leaders, cache)
 }
 
 #[cfg(test)]
@@ -127,7 +127,7 @@ fn sign_shreds_cpu(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [P
 
 #[cfg(test)]
 fn sign_shreds(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [PacketBatch]) {
-    return sign_shreds_cpu(thread_pool, keypair, batches);
+    sign_shreds_cpu(thread_pool, keypair, batches)
 }
 
 #[cfg(test)]

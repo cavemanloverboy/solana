@@ -1,10 +1,8 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-use crate::recycled_vec::RecycledVec;
 #[cfg(feature = "dev-context-only-utils")]
 use bytes::{BufMut, BytesMut};
-
 use {
-    crate::recycler::Recycler,
+    crate::{recycled_vec::RecycledVec, recycler::Recycler},
     bincode::config::Options,
     bytes::Bytes,
     rayon::{

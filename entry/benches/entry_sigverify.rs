@@ -2,7 +2,7 @@
 extern crate test;
 use {
     agave_reserved_account_keys::ReservedAccountKeys,
-    solana_entry::entry::{self, VerifyRecyclers},
+    solana_entry::entry,
     solana_hash::Hash,
     solana_message::SimpleAddressLoader,
     solana_perf::test_tx::test_tx,
@@ -10,7 +10,6 @@ use {
     solana_transaction::{
         sanitized::{MessageHash, SanitizedTransaction},
         versioned::VersionedTransaction,
-        TransactionVerificationMode,
     },
     solana_transaction_error::TransactionResult as Result,
     std::sync::Arc,
