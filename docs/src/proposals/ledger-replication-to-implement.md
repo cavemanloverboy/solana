@@ -33,7 +33,7 @@ We have the following constraints:
 - Verification requires generating the CBC blocks. That requires space of 2
 
   blocks per identity. So as many identities at once should be batched with as
-  
+
   many proofs for those identities verified concurrently for the same dataset.
 
 - Validators will randomly sample the set of storage proofs to the set that
