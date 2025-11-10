@@ -59,7 +59,7 @@ pub fn verify_shred_cpu(
     }
 }
 
-fn verify_shreds_cpu(
+pub fn verify_shreds(
     thread_pool: &ThreadPool,
     batches: &[PacketBatch],
     slot_leaders: &SlotPubkeys,
@@ -80,15 +80,6 @@ fn verify_shreds_cpu(
     });
     inc_new_counter_debug!("ed25519_shred_verify_cpu", packet_count);
     rv
-}
-
-pub fn verify_shreds(
-    thread_pool: &ThreadPool,
-    batches: &[PacketBatch],
-    slot_leaders: &SlotPubkeys,
-    cache: &RwLock<LruCache>,
-) -> Vec<Vec<u8>> {
-    verify_shreds_cpu(thread_pool, batches, slot_leaders, cache)
 }
 
 #[cfg(test)]
@@ -112,7 +103,7 @@ fn sign_shred_cpu(keypair: &Keypair, packet: &mut PacketRefMut) {
 }
 
 #[cfg(test)]
-fn sign_shreds_cpu(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [PacketBatch]) {
+fn sign_shreds(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [PacketBatch]) {
     let packet_count = count_packets_in_batches(batches);
     debug!("CPU SHRED ECDSA for {packet_count}");
     thread_pool.install(|| {
@@ -123,11 +114,6 @@ fn sign_shreds_cpu(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [P
         });
     });
     inc_new_counter_debug!("ed25519_shred_sign_cpu", packet_count);
-}
-
-#[cfg(test)]
-fn sign_shreds(thread_pool: &ThreadPool, keypair: &Keypair, batches: &mut [PacketBatch]) {
-    sign_shreds_cpu(thread_pool, keypair, batches)
 }
 
 #[cfg(test)]
@@ -201,23 +187,23 @@ mod tests {
         let mut batches = [batch];
 
         let leader_slots: SlotPubkeys = [(slot, keypair.pubkey())].into_iter().collect();
-        let rv = verify_shreds_cpu(thread_pool, &batches, &leader_slots, &cache);
+        let rv = verify_shreds(thread_pool, &batches, &leader_slots, &cache);
         assert_eq!(rv.into_iter().flatten().all_equal_value().unwrap(), 1);
 
         let wrong_keypair = Keypair::new();
         let leader_slots: SlotPubkeys = [(slot, wrong_keypair.pubkey())].into_iter().collect();
-        let rv = verify_shreds_cpu(thread_pool, &batches, &leader_slots, &cache);
+        let rv = verify_shreds(thread_pool, &batches, &leader_slots, &cache);
         assert_eq!(rv.into_iter().flatten().all_equal_value().unwrap(), 0);
 
         let leader_slots: SlotPubkeys = HashMap::default();
-        let rv = verify_shreds_cpu(thread_pool, &batches, &leader_slots, &cache);
+        let rv = verify_shreds(thread_pool, &batches, &leader_slots, &cache);
         assert_eq!(rv.into_iter().flatten().all_equal_value().unwrap(), 0);
 
         let leader_slots: SlotPubkeys = [(slot, keypair.pubkey())].into_iter().collect();
         batches[0]
             .iter_mut()
             .for_each(|mut packet_ref| packet_ref.meta_mut().size = 0);
-        let rv = verify_shreds_cpu(thread_pool, &batches, &leader_slots, &cache);
+        let rv = verify_shreds(thread_pool, &batches, &leader_slots, &cache);
         assert_eq!(rv.into_iter().flatten().all_equal_value().unwrap(), 0);
     }
 
