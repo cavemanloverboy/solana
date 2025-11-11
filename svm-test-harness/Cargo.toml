@@ -18,7 +18,7 @@ required-features = ["fuzz"]
 [features]
 agave-unstable-api = []
 dummy-for-ci-check = ["fuzz"]
-fuzz = ["dep:clap", "dep:prost", "dep:prost-build", "dep:protosol"]
+fuzz = ["dep:clap", "dep:prost", "dep:prost-build"]
 
 [dependencies]
 agave-feature-set = { workspace = true }
@@ -28,15 +28,12 @@ agave-syscalls = { workspace = true }
 bincode = { workspace = true }
 clap = { version = "4.5.2", features = ["derive"], optional = true }
 prost = { workspace = true, optional = true }
-protosol = { workspace = true, optional = true }
 solana-account = { workspace = true }
 solana-builtins = { workspace = true }
 solana-clock = { workspace = true, features = ["sysvar"] }
 solana-compute-budget = { workspace = true }
-solana-epoch-schedule = { workspace = true, features = ["sysvar"] }
 solana-instruction = { workspace = true }
 solana-instruction-error = { workspace = true, features = ["serde"] }
-solana-last-restart-slot = { workspace = true, features = ["sysvar"] }
 solana-precompile-error = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }

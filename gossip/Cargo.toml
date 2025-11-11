@@ -36,7 +36,6 @@ frozen-abi = [
 agave-unstable-api = []
 
 [dependencies]
-agave-feature-set = { workspace = true }
 agave-logger = { workspace = true }
 arc-swap = { workspace = true }
 arrayvec = { workspace = true }
@@ -62,8 +61,6 @@ solana-bloom = { workspace = true }
 solana-clap-utils = { workspace = true }
 solana-client = { workspace = true }
 solana-clock = "=3.0.0"
-solana-cluster-type = "=3.0.0"
-solana-connection-cache = { workspace = true }
 solana-entry = { workspace = true }
 solana-epoch-schedule = "=3.0.0"
 solana-frozen-abi = { version = "=3.0.1", optional = true, features = [

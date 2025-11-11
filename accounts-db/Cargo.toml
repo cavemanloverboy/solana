@@ -74,7 +74,6 @@ solana-frozen-abi = { workspace = true, optional = true, features = [
 solana-frozen-abi-macro = { workspace = true, optional = true, features = [
     "frozen-abi",
 ] }
-solana-genesis-config = { workspace = true, features = ["serde"] }
 solana-hash = { workspace = true, features = ["serde"] }
 solana-keypair = { workspace = true, optional = true }
 solana-lattice-hash = { workspace = true }

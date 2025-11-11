@@ -18,11 +18,7 @@ name = "solana_ledger"
 
 [features]
 dev-context-only-utils = ["solana-perf/dev-context-only-utils"]
-frozen-abi = [
-    "dep:solana-frozen-abi",
-    "dep:solana-frozen-abi-macro",
-    "solana-runtime/frozen-abi",
-]
+frozen-abi = ["solana-runtime/frozen-abi"]
 agave-unstable-api = []
 
 [dependencies]
@@ -58,19 +54,14 @@ reed-solomon-erasure = { workspace = true, features = ["simd-accel"] }
 scopeguard = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
-sha2 = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }
-solana-bpf-loader-program = { workspace = true }
 solana-clock = { workspace = true }
 solana-cost-model = { workspace = true }
 solana-entry = { workspace = true }
 solana-epoch-schedule = { workspace = true }
-solana-frozen-abi = { workspace = true, optional = true, features = [
-    "frozen-abi",
-] }
 solana-frozen-abi-macro = { workspace = true, optional = true, features = [
     "frozen-abi",
 ] }
@@ -92,7 +83,6 @@ solana-pubkey = { workspace = true }
 solana-rayon-threadlimit = { workspace = true }
 solana-runtime = { workspace = true }
 solana-runtime-transaction = { workspace = true }
-solana-seed-derivable = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-shred-version = { workspace = true }
 solana-signature = { workspace = true }
@@ -115,7 +105,6 @@ solana-vote = { workspace = true }
 solana-vote-program = { workspace = true }
 static_assertions = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
-strum_macros = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
@@ -138,7 +127,10 @@ criterion = { workspace = true }
 proptest = { workspace = true }
 solana-account-decoder = { workspace = true }
 # See order-crates-for-publishing.py for using this unusual `path = "."`
-solana-ledger = { path = ".", features = ["dev-context-only-utils", "agave-unstable-api"] }
+solana-ledger = { path = ".", features = [
+    "dev-context-only-utils",
+    "agave-unstable-api",
+] }
 solana-net-utils = { workspace = true, features = ["dev-context-only-utils"] }
 solana-perf = { workspace = true, features = ["dev-context-only-utils"] }
 solana-program-option = { workspace = true }

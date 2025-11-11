@@ -21,10 +21,8 @@ agave-unstable-api = []
 dev-context-only-utils = []
 
 [dependencies]
-arc-swap = { workspace = true }
 bytes = { workspace = true }
 crossbeam-channel = { workspace = true }
-dashmap = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
 histogram = { workspace = true }
@@ -37,11 +35,9 @@ num_cpus = { workspace = true }
 pem = { workspace = true }
 percentage = { workspace = true }
 quinn = { workspace = true }
-quinn-proto = { workspace = true }
 rand = { workspace = true }
 rustls = { workspace = true }
 smallvec = { workspace = true }
-socket2 = { workspace = true }
 solana-keypair = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
@@ -59,7 +55,6 @@ solana-transaction-metrics-tracker = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true, features = ["rt"] }
-x509-parser = { workspace = true }
 
 [dev-dependencies]
 agave-logger = { workspace = true }

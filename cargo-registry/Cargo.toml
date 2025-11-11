@@ -16,8 +16,8 @@ targets = ["x86_64-unknown-linux-gnu"]
 default = ["remote-wallet-hidraw"]
 agave-unstable-api = []
 dev-context-only-utils = []
-remote-wallet-hidraw = ["solana-remote-wallet/linux-static-hidraw"]
-remote-wallet-libusb = ["solana-remote-wallet/linux-static-libusb"]
+remote-wallet-hidraw = []
+remote-wallet-libusb = []
 
 [dependencies]
 agave-logger = { workspace = true }
@@ -32,11 +32,9 @@ sha2 = { workspace = true }
 solana-clap-utils = { workspace = true }
 solana-cli = { workspace = true }
 solana-cli-config = { workspace = true }
-solana-cli-output = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-remote-wallet = { workspace = true }
 solana-rpc-client = { workspace = true, features = ["default"] }
 solana-rpc-client-api = { workspace = true }
 solana-signer = { workspace = true }

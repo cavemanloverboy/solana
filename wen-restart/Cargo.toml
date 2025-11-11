@@ -24,7 +24,6 @@ agave-snapshots = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 prost = { workspace = true }
-prost-types = { workspace = true }
 rayon = { workspace = true }
 solana-clock = { workspace = true }
 solana-entry = { workspace = true }

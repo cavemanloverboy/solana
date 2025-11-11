@@ -26,7 +26,6 @@ dev-context-only-utils = [
     "solana-compute-budget-interface/dev-context-only-utils",
 ]
 frozen-abi = [
-    "dep:solana-frozen-abi",
     "dep:solana-frozen-abi-macro",
     "solana-compute-budget/frozen-abi",
     "solana-pubkey/frozen-abi",
@@ -38,16 +37,11 @@ agave-feature-set = { workspace = true }
 ahash = { workspace = true }
 log = { workspace = true }
 solana-bincode = { workspace = true }
-solana-borsh = { workspace = true }
-solana-builtins-default-costs = { workspace = true }
 solana-clock = { workspace = true }
 solana-compute-budget = { workspace = true }
 solana-compute-budget-instruction = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-fee-structure = { workspace = true }
-solana-frozen-abi = { workspace = true, optional = true, features = [
-    "frozen-abi",
-] }
 solana-frozen-abi-macro = { workspace = true, optional = true, features = [
     "frozen-abi",
 ] }
@@ -76,7 +70,10 @@ solana-compute-budget-instruction = { workspace = true, features = [
 ] }
 solana-compute-budget-interface = { workspace = true }
 solana-compute-budget-program = { workspace = true }
-solana-cost-model = { path = ".", features = ["agave-unstable-api", "dev-context-only-utils"] }
+solana-cost-model = { path = ".", features = [
+    "agave-unstable-api",
+    "dev-context-only-utils",
+] }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true, features = ["rand"] }

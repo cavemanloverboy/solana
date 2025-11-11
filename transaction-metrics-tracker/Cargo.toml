@@ -16,12 +16,10 @@ targets = ["x86_64-unknown-linux-gnu"]
 agave-unstable-api = []
 
 [dependencies]
-base64 = { workspace = true }
 bincode = { workspace = true }
 # Update this borsh dependency to the workspace version once
 log = { workspace = true }
 rand = { workspace = true }
-solana-packet = { workspace = true }
 solana-perf = { workspace = true }
 solana-short-vec = { workspace = true }
 solana-signature = { workspace = true }

@@ -20,9 +20,12 @@ name = "solana_program_runtime"
 agave-unstable-api = []
 dev-context-only-utils = []
 dummy-for-ci-check = ["metrics"]
-frozen-abi = ["dep:solana-frozen-abi", "dep:solana-frozen-abi-macro"]
+frozen-abi = ["dep:solana-frozen-abi"]
 metrics = []
-shuttle-test = ["solana-sbpf/shuttle-test", "solana-svm-type-overrides/shuttle-test"]
+shuttle-test = [
+    "solana-sbpf/shuttle-test",
+    "solana-svm-type-overrides/shuttle-test",
+]
 
 [dependencies]
 base64 = { workspace = true }
@@ -39,9 +42,6 @@ solana-epoch-rewards = { workspace = true }
 solana-epoch-schedule = { workspace = true }
 solana-fee-structure = { workspace = true }
 solana-frozen-abi = { workspace = true, optional = true, features = [
-    "frozen-abi",
-] }
-solana-frozen-abi-macro = { workspace = true, optional = true, features = [
     "frozen-abi",
 ] }
 solana-hash = { workspace = true }
