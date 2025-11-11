@@ -720,10 +720,26 @@ impl RecycledPacketBatch {
             p.meta_mut().set_socket_addr(addr);
         }
     }
+
+    pub fn push(&mut self, packet: Packet) {
+        self.packets.push(packet)
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.packets.truncate(len)
+    }
+
+    pub fn resize(&mut self, packets_per_batch: usize, value: Packet) {
+        self.packets.resize(packets_per_batch, value)
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.packets.capacity()
+    }
 }
 
 impl Deref for RecycledPacketBatch {
-    type Target = Vec<Packet>;
+    type Target = [Packet];
 
     fn deref(&self) -> &Self::Target {
         &self.packets
@@ -788,7 +804,7 @@ pub fn to_packet_batches<T: Serialize>(items: &[T], chunk_size: usize) -> Vec<Pa
         .chunks(chunk_size)
         .map(|batch_items| {
             let mut batch = RecycledPacketBatch::with_capacity(batch_items.len());
-            batch.resize(batch_items.len(), Packet::default());
+            batch.packets.resize(batch_items.len(), Packet::default());
             for (item, packet) in batch_items.iter().zip(batch.packets.iter_mut()) {
                 Packet::populate_packet(packet, None, item).expect("serialize request");
             }

@@ -4,7 +4,7 @@
 use {
     crate::{
         packet::{
-            self, PacketBatch, PacketBatchRecycler, PacketRef, RecycledPacketBatch,
+            self, Packet, PacketBatch, PacketBatchRecycler, PacketRef, RecycledPacketBatch,
             PACKETS_PER_BATCH,
         },
         sendmmsg::{batch_send, SendPktsError},
@@ -16,7 +16,6 @@ use {
     solana_net_utils::multihomed_sockets::{
         BindIpAddrs, CurrentSocket, FixedSocketProvider, MultihomedSocketProvider, SocketProvider,
     },
-    solana_packet::Packet,
     solana_pubkey::Pubkey,
     solana_time_utils::timestamp,
     std::{

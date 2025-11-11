@@ -118,6 +118,19 @@ impl<T: Clone + Default + Sized> RecycledVec<T> {
     pub fn shuffle<R: Rng>(&mut self, rng: &mut R) {
         self.x.shuffle(rng)
     }
+
+    pub fn reserve(&mut self, capacity: usize) {
+        let current_capacity = self.x.capacity();
+        self.x.reserve(capacity.saturating_sub(current_capacity));
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.x.truncate(len);
+    }
+
+    pub(crate) fn capacity(&self) -> usize {
+        self.x.capacity()
+    }
 }
 
 impl<T: Clone + Default + Sized> Clone for RecycledVec<T> {
@@ -132,7 +145,7 @@ impl<T: Clone + Default + Sized> Clone for RecycledVec<T> {
 }
 
 impl<T: Sized + Default + Clone> Deref for RecycledVec<T> {
-    type Target = Vec<T>;
+    type Target = [T];
 
     fn deref(&self) -> &Self::Target {
         &self.x
