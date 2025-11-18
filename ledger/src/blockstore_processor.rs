@@ -268,12 +268,29 @@ pub fn execute_batch<'a>(
         .filter_map(|(commit_result, tx)| commit_result.was_committed().then_some(tx))
     {
         extern "C" {
-            fn fd_ext_poh_publish_executed_txn(data: *const u8);
+            fn fd_ext_poh_publish_executed_txn(data: *const u8, len: u64);
         }
 
-        let mut memory: [u8; 64] = [0u8; 64];
-        memory.copy_from_slice(txn.signature().as_ref());
-        unsafe { fd_ext_poh_publish_executed_txn(memory.as_ptr()) };
+        let mut len = 64;
+        let mut memory: [u8; 160] = [0u8; 160];
+        memory[..64].copy_from_slice(txn.signature().as_ref());
+        let txn = txn.as_sanitized_transaction();
+        if let Some(account) = txn.get_durable_nonce() {
+            let ixn = txn.instructions_iter().next().unwrap();
+            // all nonce transactions on mainnet specify this third account statically in the
+            // instruction, but it is not strictly required
+            if let Some(&auth_idx) = ixn.accounts.get(2) {
+                // Nonce
+                memory[64..96].copy_from_slice(txn.recent_blockhash().as_ref());
+                // Nonce Acct
+                memory[96..128].copy_from_slice(account.as_array());
+                // Nonce Auth
+                memory[128..160]
+                    .copy_from_slice(txn.static_account_keys()[auth_idx as usize].as_array());
+                len = 160;
+            }
+        }
+        unsafe { fd_ext_poh_publish_executed_txn(memory.as_ptr(), len) };
     }
 
     let committed_transactions = commit_results
