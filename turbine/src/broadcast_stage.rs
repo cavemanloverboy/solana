@@ -25,12 +25,14 @@ use {
     solana_net_utils::SocketAddrSpace,
     solana_poh::poh_recorder::WorkingBankEntryOrMarker,
     solana_pubkey::Pubkey,
-    solana_runtime::{bank::MAX_LEADER_SCHEDULE_STAKES, bank_forks::BankForks},
+    solana_runtime::{
+        bank::MAX_LEADER_SCHEDULE_STAKES, bank_forks::BankForks, leader_schedule_utils,
+    },
     solana_streamer::sendmmsg::{SendPktsError, batch_send},
     solana_time_utils::{AtomicInterval, timestamp},
     std::{
         collections::{HashMap, HashSet},
-        net::UdpSocket,
+        net::{SocketAddr, UdpSocket},
         sync::{
             Arc, Mutex, RwLock,
             atomic::{AtomicBool, Ordering},
@@ -474,6 +476,15 @@ pub fn broadcast_shreds(
         let bank_forks = bank_forks.read().unwrap();
         (bank_forks.root_bank(), bank_forks.working_bank())
     };
+    let my_pubkey = cluster_info.id();
+    // Helper to find the next leader slot if it is not us.
+    let num_consecutive_leader_slots = working_bank.num_consecutive_leader_slots();
+    let find_next_leader = |slot: Slot| -> Option<Pubkey> {
+        let next_leader_slot = slot + num_consecutive_leader_slots;
+        leader_schedule_utils::slot_leader_at(next_leader_slot, &working_bank)
+            .filter(|next_leader| *next_leader != my_pubkey)
+    };
+
     let packets: Vec<_> = shreds
         .iter()
         .chunk_by(|shred| shred.slot())
@@ -482,15 +493,27 @@ pub fn broadcast_shreds(
             let cluster_nodes =
                 cluster_nodes_cache.get(slot, &root_bank, &working_bank, cluster_info);
             update_peer_stats(&cluster_nodes, last_datapoint_submit);
-
-            shreds.filter_map(move |shred| {
+            let maybe_next_leader_udp = find_next_leader(slot).and_then(|leader| {
+                cluster_info
+                    .lookup_contact_info(&leader, |node| {
+                        node.tvu(Protocol::UDP)
+                            .filter(|addr| !addr.is_ipv6() && socket_addr_space.check(addr))
+                    })
+                    .flatten()
+            });
+            shreds.flat_map(move |shred| {
                 let key = shred.id();
-                let addr = cluster_nodes
-                    .get_broadcast_peer(&key)?
-                    .tvu(Protocol::UDP)
-                    .filter(|addr| !addr.is_ipv6() && socket_addr_space.check(addr))?;
-
-                Some((shred.payload(), addr))
+                let maybe_standard_broadcast_peer = cluster_nodes
+                    .get_broadcast_peer(&key)
+                    .and_then(|ci| ci.tvu(Protocol::UDP))
+                    .filter(|addr| !addr.is_ipv6() && socket_addr_space.check(addr));
+                let maybe_next_leader = maybe_next_leader_udp
+                    .filter(|addr| Some(*addr) != maybe_standard_broadcast_peer);
+                [maybe_next_leader, maybe_standard_broadcast_peer]
+                    .into_iter()
+                    .filter_map(move |tvu_addr: Option<SocketAddr>| {
+                        tvu_addr.map(|addr| (shred.payload(), addr))
+                    })
             })
         })
         .collect();
@@ -528,7 +551,6 @@ pub fn broadcast_shreds(
     transmit_stats.total_packets += num_udp_packets;
     result
 }
-
 impl<T> From<crossbeam_channel::SendError<T>> for Error {
     fn from(_: crossbeam_channel::SendError<T>) -> Error {
         Error::Send
