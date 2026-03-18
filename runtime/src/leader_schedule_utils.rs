@@ -1,19 +1,59 @@
 use {
     crate::bank::Bank,
+    agave_feature_set::reduce_consecutive_leader_slots,
     solana_clock::{Epoch, NUM_CONSECUTIVE_LEADER_SLOTS, Slot},
     solana_leader_schedule::LeaderSchedule,
     solana_pubkey::Pubkey,
     std::collections::HashMap,
 };
 
+/// Default number of consecutive slots per leader when the feature is inactive.
+pub const DEFAULT_NUM_CONSECUTIVE_LEADER_SLOTS: u64 = NUM_CONSECUTIVE_LEADER_SLOTS;
+
+/// Number of consecutive slots per leader when the feature is active.
+pub const REDUCED_NUM_CONSECUTIVE_LEADER_SLOTS: u64 = 2;
+
+/// Returns the activation slot for the reduce_consecutive_leader_slots feature,
+/// or None if not active and not pending.
+fn reduce_consecutive_leader_slots_activation_slot(bank: &Bank) -> Option<Slot> {
+    let feature_id = reduce_consecutive_leader_slots::id();
+    if let Some(slot) = bank.feature_set.activated_slot(&feature_id) {
+        return Some(slot);
+    }
+    bank.compute_pending_activation_slot(&feature_id)
+}
+
+/// Returns the number of consecutive leader slots for the given slot.
+pub fn num_consecutive_leader_slots(slot: Slot, bank: &Bank) -> u64 {
+    if let Some(activation_slot) = reduce_consecutive_leader_slots_activation_slot(bank) {
+        if slot >= activation_slot {
+            return REDUCED_NUM_CONSECUTIVE_LEADER_SLOTS;
+        }
+    }
+    DEFAULT_NUM_CONSECUTIVE_LEADER_SLOTS
+}
+
+/// Returns the number of consecutive leader slots for the first slot of the given epoch.
+/// Used when computing the leader schedule for an epoch.
+pub fn num_consecutive_leader_slots_for_epoch(epoch: Epoch, bank: &Bank) -> u64 {
+    let first_slot = bank.epoch_schedule().get_first_slot_in_epoch(epoch);
+    if let Some(activation_slot) = reduce_consecutive_leader_slots_activation_slot(bank) {
+        if first_slot >= activation_slot {
+            return REDUCED_NUM_CONSECUTIVE_LEADER_SLOTS;
+        }
+    }
+    DEFAULT_NUM_CONSECUTIVE_LEADER_SLOTS
+}
+
 /// Return the leader schedule for the given epoch.
 pub fn leader_schedule(epoch: Epoch, bank: &Bank) -> Option<LeaderSchedule> {
+    let repeat = num_consecutive_leader_slots_for_epoch(epoch, bank);
     bank.epoch_vote_accounts(epoch).map(|vote_accounts_map| {
         LeaderSchedule::new(
             vote_accounts_map,
             epoch,
             bank.get_slots_in_epoch(epoch),
-            NUM_CONSECUTIVE_LEADER_SLOTS,
+            repeat,
         )
     })
 }
@@ -56,16 +96,40 @@ pub fn first_of_consecutive_leader_slots(slot: Slot) -> Slot {
     (slot / NUM_CONSECUTIVE_LEADER_SLOTS) * NUM_CONSECUTIVE_LEADER_SLOTS
 }
 
+/// Returns the first slot in the leader window that contains `slot`.
+/// Uses the feature-aware value when a bank is provided.
+#[inline]
+pub fn first_of_consecutive_leader_slots_with_bank(slot: Slot, bank: &Bank) -> Slot {
+    let n = num_consecutive_leader_slots(slot, bank);
+    (slot / n) * n
+}
+
 /// Returns the last slot in the leader window that contains `slot`
 #[inline]
 pub fn last_of_consecutive_leader_slots(slot: Slot) -> Slot {
     first_of_consecutive_leader_slots(slot) + NUM_CONSECUTIVE_LEADER_SLOTS - 1
 }
 
+/// Returns the last slot in the leader window that contains `slot`.
+/// Uses the feature-aware value when a bank is provided.
+#[inline]
+pub fn last_of_consecutive_leader_slots_with_bank(slot: Slot, bank: &Bank) -> Slot {
+    let n = num_consecutive_leader_slots(slot, bank);
+    first_of_consecutive_leader_slots_with_bank(slot, bank) + n - 1
+}
+
 /// Returns the index within the leader slot range that contains `slot`
 #[inline]
 pub fn leader_slot_index(slot: Slot) -> usize {
     (slot % NUM_CONSECUTIVE_LEADER_SLOTS) as usize
+}
+
+/// Returns the index within the leader slot range that contains `slot`.
+/// Uses the feature-aware value when a bank is provided.
+#[inline]
+pub fn leader_slot_index_with_bank(slot: Slot, bank: &Bank) -> usize {
+    let n = num_consecutive_leader_slots(slot, bank);
+    (slot % n) as usize
 }
 
 /// Returns the number of slots left after `slot` in the leader window

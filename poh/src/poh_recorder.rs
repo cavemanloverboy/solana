@@ -666,6 +666,20 @@ impl PohRecorder {
         self.working_bank.as_ref().map(|w| w.bank.clone())
     }
 
+    /// Returns the bank to use for feature-gated leader schedule logic.
+    /// Prefers the working bank when present, otherwise uses start_bank.
+    pub fn bank_for_leader_schedule(&self) -> Arc<Bank> {
+        self.bank().unwrap_or_else(|| self.start_bank.clone())
+    }
+
+    /// Returns the number of consecutive leader slots for the current poh slot.
+    pub fn num_consecutive_leader_slots(&self) -> u64 {
+        solana_runtime::leader_schedule_utils::num_consecutive_leader_slots(
+            self.current_poh_slot(),
+            &self.bank_for_leader_schedule(),
+        )
+    }
+
     pub fn has_bank(&self) -> bool {
         self.working_bank.is_some()
     }
@@ -782,15 +796,14 @@ impl PohRecorder {
     }
 
     fn start_slot_was_mine_or_previous_leader(&self, next_leader_slot: Slot) -> bool {
-        (next_leader_slot.saturating_sub(NUM_CONSECUTIVE_LEADER_SLOTS)..next_leader_slot).any(
-            |slot| {
-                // Check if the last slot PoH reset to was any of the
-                // previous leader's slots.
-                // If so, PoH is currently building on the previous leader's blocks
-                // If not, PoH is building on a different fork
-                slot == self.start_slot()
-            },
-        )
+        let n = self.num_consecutive_leader_slots();
+        (next_leader_slot.saturating_sub(n)..next_leader_slot).any(|slot| {
+            // Check if the last slot PoH reset to was any of the
+            // previous leader's slots.
+            // If so, PoH is currently building on the previous leader's blocks
+            // If not, PoH is building on a different fork
+            slot == self.start_slot()
+        })
     }
 
     // Check if the last slot PoH reset onto was the previous leader's last slot.
@@ -799,10 +812,9 @@ impl PohRecorder {
         my_pubkey: &Pubkey,
         next_leader_slot: Slot,
     ) -> bool {
+        let n = self.num_consecutive_leader_slots();
         // Walk backwards from the slot before our next leader slot.
-        for slot in
-            (next_leader_slot.saturating_sub(NUM_CONSECUTIVE_LEADER_SLOTS)..next_leader_slot).rev()
-        {
+        for slot in (next_leader_slot.saturating_sub(n)..next_leader_slot).rev() {
             // Identify which leader is responsible for building this slot.
             let leader_for_slot = self.leader_schedule_cache.slot_leader_at(slot, None);
             let Some(leader_for_slot) = leader_for_slot else {
@@ -878,6 +890,8 @@ impl PohRecorder {
             .unwrap_or((
                 None,
                 0,
+                // Conservative default when no leader slot is known: uses the
+                // pre-feature value so we never under-estimate grace ticks.
                 cmp::min(
                     ticks_per_slot * MAX_GRACE_SLOTS,
                     ticks_per_slot * NUM_CONSECUTIVE_LEADER_SLOTS / GRACE_TICKS_FACTOR,

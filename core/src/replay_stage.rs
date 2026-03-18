@@ -48,7 +48,7 @@ use {
     crossbeam_channel::{Receiver, RecvTimeoutError, Sender},
     rayon::{ThreadPool, prelude::*},
     solana_accounts_db::contains::Contains,
-    solana_clock::{BankId, NUM_CONSECUTIVE_LEADER_SLOTS, Slot},
+    solana_clock::{BankId, Slot},
     solana_geyser_plugin_manager::block_metadata_notifier_interface::BlockMetadataNotifierArc,
     solana_gossip::cluster_info::ClusterInfo,
     solana_hash::Hash,
@@ -84,7 +84,9 @@ use {
         bank_forks::BankForks,
         commitment::BlockCommitmentCache,
         installed_scheduler_pool::BankWithScheduler,
-        leader_schedule_utils::first_of_consecutive_leader_slots,
+        leader_schedule_utils::{
+            first_of_consecutive_leader_slots_with_bank, num_consecutive_leader_slots,
+        },
         prioritization_fee_cache::PrioritizationFeeCache,
         snapshot_controller::SnapshotController,
         vote_sender_types::{ReplayVoteMessage, ReplayVoteSender},
@@ -1529,8 +1531,10 @@ impl ReplayStage {
         retransmit_slots_sender: &Sender<Slot>,
         progress: &mut ProgressMap,
         latest_leader_slot: Slot,
+        bank: &Bank,
     ) {
-        let first_leader_group_slot = first_of_consecutive_leader_slots(latest_leader_slot);
+        let first_leader_group_slot =
+            first_of_consecutive_leader_slots_with_bank(latest_leader_slot, bank);
 
         for slot in first_leader_group_slot..=latest_leader_slot {
             let is_propagated = progress.is_propagated(slot);
@@ -1588,11 +1592,13 @@ impl ReplayStage {
                 "Slot not propagated: start_slot={start_slot} \
                  latest_leader_slot={latest_leader_slot}"
             );
+            let bank = poh_recorder.read().unwrap().bank_for_leader_schedule();
             Self::maybe_retransmit_unpropagated_slots(
                 "replay_stage-retransmit-timing-based",
                 retransmit_slots_sender,
                 progress,
                 latest_leader_slot,
+                &bank,
             );
         }
     }
@@ -2228,31 +2234,15 @@ impl ReplayStage {
         poh_slot: Slot,
         parent_slot: Slot,
         progress_map: &ProgressMap,
+        bank: &Bank,
     ) -> bool {
-        // Assume `NUM_CONSECUTIVE_LEADER_SLOTS` = 4. Then `skip_propagated_check`
-        // below is true if `poh_slot` is within the same `NUM_CONSECUTIVE_LEADER_SLOTS`
-        // set of blocks as `latest_leader_slot`.
-        //
-        // Example 1 (`poh_slot` directly descended from `latest_leader_slot`):
-        //
-        // [B B B B] [B B B latest_leader_slot] poh_slot
-        //
-        // Example 2:
-        //
-        // [B latest_leader_slot B poh_slot]
-        //
-        // In this example, even if there's a block `B` on another fork between
-        // `poh_slot` and `parent_slot`, because they're in the same
-        // `NUM_CONSECUTIVE_LEADER_SLOTS` block, we still skip the propagated
-        // check because it's still within the propagation grace period.
-        //
-        // We've already checked in start_leader() that parent_slot hasn't been
-        // dumped, so we should get it in the progress map.
+        // `skip_propagated_check` is true if `poh_slot` is within the same
+        // consecutive leader slots set of blocks as `latest_leader_slot`.
+        let n = num_consecutive_leader_slots(poh_slot, bank);
         if let Some(latest_leader_slot) =
             progress_map.get_latest_leader_slot_must_exist(parent_slot)
         {
-            let skip_propagated_check =
-                poh_slot - latest_leader_slot < NUM_CONSECUTIVE_LEADER_SLOTS;
+            let skip_propagated_check = poh_slot - latest_leader_slot < n;
             if skip_propagated_check {
                 return true;
             }
@@ -2267,10 +2257,9 @@ impl ReplayStage {
             .0
     }
 
-    fn should_retransmit(poh_slot: Slot, last_retransmit_slot: &mut Slot) -> bool {
-        if poh_slot < *last_retransmit_slot
-            || poh_slot >= *last_retransmit_slot + NUM_CONSECUTIVE_LEADER_SLOTS
-        {
+    fn should_retransmit(poh_slot: Slot, last_retransmit_slot: &mut Slot, bank: &Bank) -> bool {
+        let n = num_consecutive_leader_slots(poh_slot, bank);
+        if poh_slot < *last_retransmit_slot || poh_slot >= *last_retransmit_slot + n {
             *last_retransmit_slot = poh_slot;
             true
         } else {
@@ -2357,7 +2346,12 @@ impl ReplayStage {
                 ("leader", next_leader_id.to_string(), String),
             );
 
-            if !Self::check_propagation_for_start_leader(poh_slot, parent_slot, progress_map) {
+            if !Self::check_propagation_for_start_leader(
+                poh_slot,
+                parent_slot,
+                progress_map,
+                &parent,
+            ) {
                 let latest_unconfirmed_leader_slot = progress_map
                     .get_latest_leader_slot_must_exist(parent_slot)
                     .expect(
@@ -2378,12 +2372,17 @@ impl ReplayStage {
                     progress_map.log_propagated_stats(latest_unconfirmed_leader_slot, bank_forks);
                     skipped_slots_info.last_skipped_slot = poh_slot;
                 }
-                if Self::should_retransmit(poh_slot, &mut skipped_slots_info.last_retransmit_slot) {
+                if Self::should_retransmit(
+                    poh_slot,
+                    &mut skipped_slots_info.last_retransmit_slot,
+                    &parent,
+                ) {
                     Self::maybe_retransmit_unpropagated_slots(
                         "replay_stage-retransmit",
                         retransmit_slots_sender,
                         progress_map,
                         latest_unconfirmed_leader_slot,
+                        &parent,
                     );
                 }
                 return None;
@@ -6190,20 +6189,24 @@ pub(crate) mod tests {
 
     #[test]
     fn test_should_retransmit() {
+        use solana_clock::NUM_CONSECUTIVE_LEADER_SLOTS;
+        let bank = Bank::new_for_tests(&genesis_config::create_genesis_config(10000).0);
         let poh_slot = 4;
         let mut last_retransmit_slot = 4;
         // We retransmitted already at slot 4, shouldn't retransmit until
         // >= 4 + NUM_CONSECUTIVE_LEADER_SLOTS, or if we reset to < 4
         assert!(!ReplayStage::should_retransmit(
             poh_slot,
-            &mut last_retransmit_slot
+            &mut last_retransmit_slot,
+            &bank,
         ));
         assert_eq!(last_retransmit_slot, 4);
 
         for poh_slot in 4..4 + NUM_CONSECUTIVE_LEADER_SLOTS {
             assert!(!ReplayStage::should_retransmit(
                 poh_slot,
-                &mut last_retransmit_slot
+                &mut last_retransmit_slot,
+                &bank,
             ));
             assert_eq!(last_retransmit_slot, 4);
         }
@@ -6212,7 +6215,8 @@ pub(crate) mod tests {
         last_retransmit_slot = 4;
         assert!(ReplayStage::should_retransmit(
             poh_slot,
-            &mut last_retransmit_slot
+            &mut last_retransmit_slot,
+            &bank,
         ));
         assert_eq!(last_retransmit_slot, poh_slot);
 
@@ -6220,7 +6224,8 @@ pub(crate) mod tests {
         last_retransmit_slot = 4;
         assert!(ReplayStage::should_retransmit(
             poh_slot,
-            &mut last_retransmit_slot
+            &mut last_retransmit_slot,
+            &bank,
         ));
         assert_eq!(last_retransmit_slot, poh_slot);
     }
@@ -6646,9 +6651,14 @@ pub(crate) mod tests {
 
     #[test]
     fn test_check_propagation_for_start_leader() {
+        use solana_clock::NUM_CONSECUTIVE_LEADER_SLOTS;
         let mut progress_map = ProgressMap::default();
         let poh_slot = 5;
         let parent_slot = poh_slot - NUM_CONSECUTIVE_LEADER_SLOTS;
+
+        let bank0 = Bank::new_for_tests(&genesis_config::create_genesis_config(10000).0);
+        let parent_slot_bank =
+            Bank::new_from_parent(Arc::new(bank0), &Pubkey::default(), parent_slot);
 
         // If there is no previous leader slot (previous leader slot is None),
         // should succeed
@@ -6660,6 +6670,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &parent_slot_bank,
         ));
 
         // Now if we make the parent was itself the leader, then requires propagation
@@ -6679,6 +6690,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &parent_slot_bank,
         ));
         progress_map
             .get_mut(&parent_slot)
@@ -6689,6 +6701,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &parent_slot_bank,
         ));
         // Now, set up the progress map to show that the `previous_leader_slot` of 5 is
         // `parent_slot - 1` (not equal to the actual parent!), so `parent_slot - 1` needs
@@ -6714,6 +6727,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &parent_slot_bank,
         ));
 
         // If we set the is_propagated = true for the `previous_leader_slot`, should
@@ -6727,13 +6741,11 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &parent_slot_bank,
         ));
 
         // If the root is now set to `parent_slot`, this filters out `previous_leader_slot` from the progress map,
         // which implies confirmation
-        let bank0 = Bank::new_for_tests(&genesis_config::create_genesis_config(10000).0);
-        let parent_slot_bank =
-            Bank::new_from_parent(Arc::new(bank0), &Pubkey::default(), parent_slot);
         let bank_forks = BankForks::new_rw_arc(parent_slot_bank);
         let mut bank_forks = bank_forks.write().unwrap();
         let bank5 =
@@ -6744,15 +6756,19 @@ pub(crate) mod tests {
         progress_map.handle_new_root(&bank_forks);
 
         // Should succeed
+        let parent_bank = bank_forks.get(parent_slot).unwrap();
         assert!(ReplayStage::check_propagation_for_start_leader(
             poh_slot,
             parent_slot,
             &progress_map,
+            parent_bank.as_ref(),
         ));
     }
 
     #[test]
     fn test_check_propagation_skip_propagation_check() {
+        use solana_clock::NUM_CONSECUTIVE_LEADER_SLOTS;
+        let bank = Bank::new_for_tests(&genesis_config::create_genesis_config(10000).0);
         let mut progress_map = ProgressMap::default();
         let poh_slot = 4;
         let mut parent_slot = poh_slot - 1;
@@ -6777,6 +6793,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &bank,
         ));
 
         // If propagation threshold was achieved on parent, block should
@@ -6790,6 +6807,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &bank,
         ));
 
         // Now insert another parent slot 2 for which this validator is also the leader
@@ -6812,6 +6830,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &bank,
         ));
 
         // Once the distance becomes >= NUM_CONSECUTIVE_LEADER_SLOTS, then we need to
@@ -6831,6 +6850,7 @@ pub(crate) mod tests {
             poh_slot,
             parent_slot,
             &progress_map,
+            &bank,
         ));
     }
 
@@ -9099,12 +9119,15 @@ pub(crate) mod tests {
         }
 
         // expect single slot when latest_leader_slot is the start of a consecutive range
+        let bank = bank_forks.read().unwrap().get(0).unwrap().clone();
+        let n = solana_runtime::leader_schedule_utils::num_consecutive_leader_slots(0, &bank);
         let latest_leader_slot = 0;
         ReplayStage::maybe_retransmit_unpropagated_slots(
             "test",
             &retransmit_slots_sender,
             &mut progress,
             latest_leader_slot,
+            &bank,
         );
         let received_slots = receive_slots(&retransmit_slots_receiver);
         assert_eq!(received_slots, vec![0]);
@@ -9116,9 +9139,12 @@ pub(crate) mod tests {
             &retransmit_slots_sender,
             &mut progress,
             latest_leader_slot,
+            &bank,
         );
         let received_slots = receive_slots(&retransmit_slots_receiver);
-        assert_eq!(received_slots, vec![4, 5, 6]);
+        let first_slot = (latest_leader_slot / n) * n;
+        let expected: Vec<_> = (first_slot..=latest_leader_slot).collect();
+        assert_eq!(received_slots, expected);
 
         // expect range of slots skipping a discontinuity in the range
         let latest_leader_slot = 11;
@@ -9127,9 +9153,14 @@ pub(crate) mod tests {
             &retransmit_slots_sender,
             &mut progress,
             latest_leader_slot,
+            &bank,
         );
         let received_slots = receive_slots(&retransmit_slots_receiver);
-        assert_eq!(received_slots, vec![8, 9, 11]);
+        let first_slot = (latest_leader_slot / n) * n;
+        let expected: Vec<_> = (first_slot..=latest_leader_slot)
+            .filter(|s| progress.contains(s))
+            .collect();
+        assert_eq!(received_slots, expected);
     }
 
     #[test]
@@ -9951,6 +9982,14 @@ pub(crate) mod tests {
                 }
             })
             .unwrap();
+
+        // Mark root slot as propagated so check_propagation_for_start_leader passes.
+        // With feature-aware num_consecutive_leader_slots (e.g. n=2), poh_slot 3 and
+        // latest_leader_slot 0 are >= n apart, so we require propagation confirmation.
+        progress
+            .get_propagated_stats_mut(initial_slot)
+            .unwrap()
+            .is_propagated = true;
 
         // We should now start leader for dummy_slot + 1
         let good_slot = dummy_slot + 1;

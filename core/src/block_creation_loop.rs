@@ -25,7 +25,9 @@ use {
     solana_runtime::{
         bank::{Bank, NewBankOptions},
         bank_forks::BankForks,
-        leader_schedule_utils::{last_of_consecutive_leader_slots, leader_slot_index},
+        leader_schedule_utils::{
+            last_of_consecutive_leader_slots_with_bank, leader_slot_index_with_bank,
+        },
     },
     stats::{LoopMetrics, SlotMetrics},
     std::{
@@ -294,8 +296,11 @@ fn produce_window(
         // yet frozen, we wait up until the timeout.
         start_leader_wait_for_parent_replay(slot, parent_slot, skip_timer, ctx)?;
 
-        let leader_index = leader_slot_index(slot);
-        let timeout = block_timeout(leader_index);
+        let timeout = {
+            let poh_recorder = ctx.poh_recorder.read().unwrap();
+            let bank = poh_recorder.bank_for_leader_schedule();
+            block_timeout(leader_slot_index_with_bank(slot, &bank))
+        };
         trace!(
             "{my_pubkey}: waiting for leader bank {slot} to finish, remaining time: {}",
             timeout.saturating_sub(skip_timer.elapsed()).as_millis(),
@@ -410,8 +415,14 @@ fn start_leader_wait_for_parent_replay(
         ctx.my_pubkey
     );
     let my_pubkey = ctx.my_pubkey;
-    let timeout = block_timeout(leader_slot_index(slot));
-    let end_slot = last_of_consecutive_leader_slots(slot);
+    let (timeout, end_slot) = {
+        let poh_recorder = ctx.poh_recorder.read().unwrap();
+        let bank = poh_recorder.bank_for_leader_schedule();
+        (
+            block_timeout(leader_slot_index_with_bank(slot, &bank)),
+            last_of_consecutive_leader_slots_with_bank(slot, &bank),
+        )
+    };
 
     let mut slot_delay_start = Measure::start("slot_delay");
     while !timeout.saturating_sub(skip_timer.elapsed()).is_zero() {

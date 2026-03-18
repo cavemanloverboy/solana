@@ -1311,6 +1311,10 @@ pub mod direct_account_pointers_in_program_input {
     solana_pubkey::declare_id!("ptrXWLkSDMZZmZN8GAT6W5yW4EvYByfw6cRRHbXwQNS");
 }
 
+pub mod reduce_consecutive_leader_slots {
+    solana_pubkey::declare_id!("9N4TN7bBtviskXWRo8pFcvp4caa6pPUQTx9BRWyeYLo");
+}
+
 pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::new(|| {
     [
         (secp256k1_program_enabled::id(), "secp256k1 program"),
@@ -2346,6 +2350,10 @@ pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::n
         (
             direct_account_pointers_in_program_input::id(),
             "SIMD-0449: Direct Account Pointers in Program Input",
+        ),
+        (
+            reduce_consecutive_leader_slots::id(),
+            "reduce consecutive leader slots from 4 to 2",
         ),
         /*************** ADD NEW FEATURES HERE ***************/
     ]

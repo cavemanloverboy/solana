@@ -1,5 +1,4 @@
 use {
-    solana_clock::NUM_CONSECUTIVE_LEADER_SLOTS,
     solana_gossip::{cluster_info::ClusterInfo, contact_info::Protocol},
     solana_poh::poh_recorder::PohRecorder,
     solana_pubkey::Pubkey,
@@ -42,8 +41,9 @@ impl TpuInfo for ClusterTpuInfo {
 
     fn get_leader_tpus(&self, max_count: u64) -> Vec<&SocketAddr> {
         let recorder = self.poh_recorder.read().unwrap();
+        let step = recorder.num_consecutive_leader_slots();
         let leaders: Vec<_> = (0..max_count)
-            .filter_map(|i| recorder.leader_after_n_slots(i * NUM_CONSECUTIVE_LEADER_SLOTS))
+            .filter_map(|i| recorder.leader_after_n_slots(i * step))
             .collect();
         drop(recorder);
         let mut unique_leaders = vec![];
@@ -59,8 +59,9 @@ impl TpuInfo for ClusterTpuInfo {
 
     fn get_not_unique_leader_tpus(&self, max_count: u64) -> Vec<&SocketAddr> {
         let recorder = self.poh_recorder.read().unwrap();
+        let step = recorder.num_consecutive_leader_slots();
         let leader_pubkeys: Vec<_> = (0..max_count)
-            .filter_map(|i| recorder.leader_after_n_slots(i * NUM_CONSECUTIVE_LEADER_SLOTS))
+            .filter_map(|i| recorder.leader_after_n_slots(i * step))
             .collect();
         drop(recorder);
         leader_pubkeys
@@ -74,6 +75,7 @@ impl TpuInfo for ClusterTpuInfo {
 mod test {
     use {
         super::*,
+        solana_clock::NUM_CONSECUTIVE_LEADER_SLOTS,
         solana_gossip::contact_info::ContactInfo,
         solana_keypair::Keypair,
         solana_ledger::{
